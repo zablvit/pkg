@@ -8,14 +8,28 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/gitops-tools/pkg/test"
 	"github.com/google/go-cmp/cmp"
-	"github.com/jenkins-x/go-scm/scm"
-	"github.com/jenkins-x/go-scm/scm/factory"
+	"github.com/ocraviotto/go-scm/scm"
+	"github.com/ocraviotto/go-scm/scm/factory"
+	"github.com/ocraviotto/pkg/test"
 	"gopkg.in/h2non/gock.v1"
 )
 
 var _ GitClient = (*SCMClient)(nil)
+
+type ghCommitAuthor struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type ghContentS struct {
+	Branch    string         `json:"branch"`
+	Message   string         `json:"message"`
+	Content   *string        `json:"content"`
+	Sha       string         `json:"sha"`
+	Author    ghCommitAuthor `json:"author"`
+	Committer ghCommitAuthor `json:"committer"`
+}
 
 func TestGetFile(t *testing.T) {
 	gock.New("https://api.github.com").
@@ -80,15 +94,35 @@ func TestUpdateFile(t *testing.T) {
 	content := []byte("testing")
 	branch := "my-test-branch"
 	sha := "980a0d5f19a64b4b30a87d4206aade58726b60e3"
+	signature := scm.Signature{
+		Name:  "John Doe",
+		Email: "john.doe@example.com",
+	}
 
 	encode := func(b []byte) string {
 		return base64.StdEncoding.EncodeToString(b)
 	}
 
+	c := encode(content)
+	r := ghContentS{
+		Branch:  branch,
+		Message: message,
+		Content: &c,
+		Sha:     sha,
+		Author: ghCommitAuthor{
+			Name:  signature.Name,
+			Email: signature.Email,
+		},
+		Committer: ghCommitAuthor{
+			Name:  signature.Name,
+			Email: signature.Email,
+		},
+	}
+
 	gock.New("https://api.github.com").
 		Put("/repos/Codertocat/Hello-World/contents/config/my/file.yaml").
 		MatchType("json").
-		JSON(map[string]string{"message": message, "content": encode(content), "branch": branch, "sha": sha}).
+		JSON(r).
 		Reply(http.StatusCreated).
 		Type("application/json").
 		File("testdata/content.json")
@@ -102,7 +136,54 @@ func TestUpdateFile(t *testing.T) {
 
 	err = client.UpdateFile(context.TODO(), "Codertocat/Hello-World", branch,
 		"config/my/file.yaml", message, "980a0d5f19a64b4b30a87d4206aade58726b60e3",
-		[]byte(`testing`))
+		signature, []byte(`testing`))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteFile(t *testing.T) {
+	message := "just another message"
+	branch := "my-test-branch"
+	sha := "980a0d5f19a64b4b30a87d4206aade58726b60e3"
+	signature := scm.Signature{
+		Name:  "John Doe",
+		Email: "john.doe@example.com",
+	}
+
+	r := ghContentS{
+		Branch:  branch,
+		Message: message,
+		Sha:     sha,
+		Author: ghCommitAuthor{
+			Name:  signature.Name,
+			Email: signature.Email,
+		},
+		Committer: ghCommitAuthor{
+			Name:  signature.Name,
+			Email: signature.Email,
+		},
+	}
+
+	gock.Observe(gock.DumpRequest)
+	gock.New("https://api.github.com").
+		Delete("/repos/Codertocat/Hello-World/contents/config/my/file.yaml").
+		MatchType("json").
+		JSON(r).
+		Reply(http.StatusCreated).
+		Type("application/json").
+		File("testdata/content.json")
+	defer gock.Off()
+
+	scmClient, err := factory.NewClient("github", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := New(scmClient)
+
+	err = client.DeleteFile(context.TODO(), "Codertocat/Hello-World", branch,
+		"config/my/file.yaml", message, "980a0d5f19a64b4b30a87d4206aade58726b60e3",
+		signature, []byte{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +192,10 @@ func TestUpdateFile(t *testing.T) {
 func TestUpdateFileWithNoConnection(t *testing.T) {
 	message := "just a test message"
 	branch := "my-test-branch"
+	signature := scm.Signature{
+		Name:  "John Doe",
+		Email: "john.doe@example.com",
+	}
 
 	scmClient, err := factory.NewClient("github", "https://localhost:2000", "")
 	if err != nil {
@@ -120,7 +205,7 @@ func TestUpdateFileWithNoConnection(t *testing.T) {
 
 	err = client.UpdateFile(context.TODO(), "Codertocat/Hello-World", branch,
 		"config/my/file.yaml", message, "980a0d5f19a64b4b30a87d4206aade58726b60e3",
-		[]byte(`testing`))
+		signature, []byte(`testing`))
 	if !test.MatchError(t, `connect: connection refused`, err) {
 		t.Fatalf("failed to match error: %s", err)
 	}
@@ -159,8 +244,7 @@ func TestCreateBranchInGitLab(t *testing.T) {
 
 	gock.New("https://gitlab.com").
 		Post("/api/v4/projects/Codertocat/Hello-World/repository/branches").
-		MatchParam("branch", branch).
-		MatchParam("ref", sha).
+		JSON(map[string]string{"branch": branch, "ref": sha}).
 		Reply(http.StatusCreated).
 		Type("application/json").
 		File("testdata/content.json")
@@ -197,10 +281,10 @@ func TestCreatePullRequest(t *testing.T) {
 	defer gock.Off()
 
 	input := &scm.PullRequestInput{
-		Title: title,
-		Body:  "Please pull these awesome changes in!",
-		Head:  "octocat:new-feature",
-		Base:  "master",
+		Title:  title,
+		Body:   "Please pull these awesome changes in!",
+		Source: "octocat:new-feature",
+		Target: "master",
 	}
 	scmClient, err := factory.NewClient("github", "", "")
 	if err != nil {
@@ -218,11 +302,12 @@ func TestCreatePullRequest(t *testing.T) {
 }
 
 func TestGetBranchHead(t *testing.T) {
+	sha := "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
 	gock.New("https://api.github.com").
-		Get("/repos/Codertocat/Hello-World/git/refs/heads/master").
+		Get("/repos/Codertocat/Hello-World/branches/master").
 		Reply(http.StatusOK).
 		Type("application/json").
-		File("testdata/single_ref.json")
+		File("testdata/github_get_branch.json")
 	defer gock.Off()
 
 	scmClient, err := factory.NewClient("github", "", "")
@@ -231,13 +316,17 @@ func TestGetBranchHead(t *testing.T) {
 	}
 	client := New(scmClient)
 
-	_, err = client.GetBranchHead(context.Background(), "Codertocat/Hello-World", "master")
+	rSha, err := client.GetBranchHead(context.Background(), "Codertocat/Hello-World", "master")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !gock.IsDone() {
 		t.Fatal("ref was not fetched")
 	}
+	if rSha != sha {
+		t.Fatalf("got a different sha back: %s != %s\n", rSha, sha)
+	}
+
 }
 
 func mustParseJSONAsContent(t *testing.T, filename string) *scm.Content {
@@ -256,8 +345,8 @@ func mustParseJSONAsContent(t *testing.T, filename string) *scm.Content {
 		t.Fatal(err)
 	}
 	return &scm.Content{
-		Path: data["path"].(string),
-		Sha:  data["sha"].(string),
-		Data: content,
+		Path:   data["path"].(string),
+		BlobID: data["sha"].(string),
+		Data:   content,
 	}
 }

@@ -3,7 +3,7 @@ package updater
 import (
 	"context"
 
-	"github.com/jenkins-x/go-scm/scm"
+	"github.com/ocraviotto/go-scm/scm"
 )
 
 // GitUpdater defines the way to apply changes to files in Git.

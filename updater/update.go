@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/jenkins-x/go-scm/scm"
+	"github.com/ocraviotto/go-scm/scm"
 
-	"github.com/gitops-tools/pkg/client"
-	"github.com/gitops-tools/pkg/names"
+	"github.com/ocraviotto/pkg/client"
+	"github.com/ocraviotto/pkg/names"
 )
 
 // ContentUpdater takes an existing body, it should transform it, and return the
@@ -22,11 +22,14 @@ type UpdaterFunc func(u *Updater)
 
 // CommitInput is used to configure the commit and pull request.
 type CommitInput struct {
-	Repo               string // e.g. my-org/my-repo
-	Filename           string // relative path to the file in the repository
-	Branch             string // e.g. main
-	BranchGenerateName string // e.g. update-image-
-	CommitMessage      string // This is used for the commit when updating the file
+	Repo               string        // e.g. my-org/my-repo
+	Filename           string        // relative path to the file in the repository
+	Branch             string        // e.g. main
+	BranchGenerateName string        // e.g. update-image-
+	CreateMissing      bool          // Whether to create the target file if it's missing
+	RemoveFile         bool          // Whether to remove the target file
+	CommitMessage      string        // This is used for the commit when updating the file
+	Signature          scm.Signature // This identifies a git commit creator
 }
 
 // PullRequestInput provides configuration for the PullRequest to be opened.
@@ -63,19 +66,33 @@ type Updater struct {
 	log           logr.Logger
 }
 
-// ApplyUpdateToFile does the job of fetching the existing file, passing it to a
-// user-provided function, and optionally creating a PR.
+// ApplyUpdateToFile does the job of fetching a file, passing it to a
+// user-provided function if not deleting it, and optionally creating a PR.
 func (u *Updater) ApplyUpdateToFile(ctx context.Context, input CommitInput, f ContentUpdater) (string, error) {
+	var updated []byte
+	var isNotFoundError bool
+	isFileOp := input.RemoveFile || input.CreateMissing
 	current, err := u.gitClient.GetFile(ctx, input.Repo, input.Branch, input.Filename)
 	if err != nil {
-		u.log.Info("failed to get file from repo", "err", err)
-		return "", err
+		isNotFoundError = client.IsNotFound(err)
+		if !isFileOp || (isFileOp && !isNotFoundError) {
+			u.log.Info("failed to get file from repo", "err", err)
+			return "", err
+		}
 	}
-	u.log.Info("got existing file", "sha", current.Sha)
-	updated, err := f(current.Data)
-	if err != nil {
-		return "", err
+	if isNotFoundError && input.RemoveFile {
+		return "", fmt.Errorf("removing a non-existing file %s in branch %s is not necessary", input.Filename, input.Branch)
 	}
+	if current.Sha != "" {
+		u.log.Info("got existing file", "sha", current.Sha)
+	}
+	if !input.RemoveFile {
+		updated, err = f(current.Data)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	return u.applyUpdate(ctx, input, current.Sha, updated)
 }
 
@@ -88,12 +105,23 @@ func (u *Updater) applyUpdate(ctx context.Context, input CommitInput, currentSHA
 	if err != nil {
 		return "", err
 	}
-	err = u.gitClient.UpdateFile(ctx, input.Repo, newBranchName, input.Filename, input.CommitMessage, currentSHA, newBody)
+
+	if input.RemoveFile {
+		err = u.gitClient.DeleteFile(ctx, input.Repo, newBranchName, input.Filename, input.CommitMessage, currentSHA, input.Signature, newBody)
+		if err != nil {
+			return "", fmt.Errorf("failed to delete file: %w", err)
+		}
+		u.log.Info("deleted file", "filename", input.Filename)
+		return newBranchName, nil
+	}
+
+	err = u.gitClient.UpdateFile(ctx, input.Repo, newBranchName, input.Filename, input.CommitMessage, currentSHA, input.Signature, newBody)
 	if err != nil {
 		return "", fmt.Errorf("failed to update file: %w", err)
 	}
 	u.log.Info("updated file", "filename", input.Filename)
 	return newBranchName, nil
+
 }
 
 func (u *Updater) createBranchIfNecessary(ctx context.Context, input CommitInput, sourceRef string) (string, error) {
@@ -114,10 +142,10 @@ func (u *Updater) createBranchIfNecessary(ctx context.Context, input CommitInput
 
 func (u *Updater) CreatePR(ctx context.Context, input PullRequestInput) (*scm.PullRequest, error) {
 	pr, err := u.gitClient.CreatePullRequest(ctx, input.Repo, &scm.PullRequestInput{
-		Title: input.Title,
-		Body:  input.Body,
-		Head:  input.NewBranch,
-		Base:  input.SourceBranch,
+		Title:  input.Title,
+		Body:   input.Body,
+		Source: input.NewBranch,
+		Target: input.SourceBranch,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a pull request: %w", err)

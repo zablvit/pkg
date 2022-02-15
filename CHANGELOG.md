@@ -2,7 +2,7 @@
 
 ## [v0.1.1](https://github.com/ocraviotto/pkg/tree/v0.1.1) (2022-02-15)
 
-[Full Changelog](https://github.com/ocraviotto/pkg/compare/578a5e84296a422c95e4f15e08e2ecd5e91ad0d0...v0.1.1)
+[Full Changelog](https://github.com/ocraviotto/pkg/compare/fcf21b44903fcea5bbb9d26aace8f2d93a7730d0...v0.1.1)
 
 **Implemented enhancements:**
 

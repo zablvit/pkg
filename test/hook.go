@@ -3,8 +3,8 @@ package test
 import (
 	"testing"
 
-	"github.com/jenkins-x/go-scm/scm"
-	"github.com/jenkins-x/go-scm/scm/factory"
+	"github.com/ocraviotto/go-scm/scm"
+	"github.com/ocraviotto/go-scm/scm/factory"
 )
 
 // MakeHookFromFixture creates and returns a WebHook parsed from the provided

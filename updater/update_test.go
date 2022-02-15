@@ -3,10 +3,12 @@ package updater
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
-	"github.com/gitops-tools/pkg/client/mock"
-	"github.com/jenkins-x/go-scm/scm"
+	"github.com/ocraviotto/go-scm/scm"
+	"github.com/ocraviotto/pkg/client"
+	"github.com/ocraviotto/pkg/client/mock"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -68,6 +70,63 @@ func TestApplyUpdateToFileMissingFile(t *testing.T) {
 	m.AssertNoPullRequestsCreated()
 }
 
+func TestApplyUpdateToFileMissingWithCreate(t *testing.T) {
+	createBranch := "test-branch-a"
+	content := "testing"
+	testSHA := "980a0d5f19a64b4b30a87d4206aade58726b60e3"
+	m := mock.New(t)
+	m.AddFileContents(testGitHubRepo, testFilePath, testBranch, []byte("test:\n  image: old-image\n"))
+	m.AddBranchHead(testGitHubRepo, testBranch, testSHA)
+	updater := New(zap.New(), m, NameGenerator(stubNameGenerator{"a"}))
+	testErr := client.SCMError{
+		Msg:    fmt.Sprintf("failed to get file %s from repo %s ref %s", testFilePath, testGitHubRepo, testSHA),
+		Status: 404,
+	}
+	m.GetFileErr = testErr
+	input := makeCommitInput()
+	input.CreateMissing = true
+
+	newBranch, err := updater.ApplyUpdateToFile(context.Background(), input, func([]byte) ([]byte, error) {
+		return []byte(content), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := newBranch; s != createBranch {
+		t.Fatalf("failed to create branch, got %#v, want %#v", createBranch, newBranch)
+	}
+	updated := m.GetUpdatedContents(testGitHubRepo, testFilePath, createBranch)
+	if s := string(updated); s != content {
+		t.Fatalf("update failed, got %#v, want %#v", s, content)
+	}
+	m.AssertBranchCreated(testGitHubRepo, createBranch, testSHA)
+}
+
+func TestKeyRemoval(t *testing.T) {
+	createBranch := "test-branch-a"
+	testSHA := "980a0d5f19a64b4b30a87d4206aade58726b60e3"
+	m := mock.New(t)
+	m.AddFileContents(testGitHubRepo, testFilePath, testBranch, []byte("test:\n  image: old-image\n"))
+	m.AddBranchHead(testGitHubRepo, testBranch, testSHA)
+	updater := New(zap.New(), m, NameGenerator(stubNameGenerator{"a"}))
+	newBody := []byte("test: {}\n")
+	input := makeCommitInput()
+
+	branch, err := updater.ApplyUpdateToFile(context.Background(), input, RemoveYAMLKey("test.image"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != createBranch {
+		t.Fatalf("newly created branch, got %#v, want %#v", branch, createBranch)
+	}
+	updated := m.GetUpdatedContents(testGitHubRepo, testFilePath, createBranch)
+	if s := string(updated); s != string(newBody) {
+		t.Fatalf("update failed, got %#v, want %#v", s, string(newBody))
+	}
+	m.AssertBranchCreated(testGitHubRepo, createBranch, testSHA)
+	m.AssertNoPullRequestsCreated()
+}
+
 func TestApplyUpdateToFileWithBranchCreationFailure(t *testing.T) {
 	testSHA := "980a0d5f19a64b4b30a87d4206aade58726b60e3"
 	m := mock.New(t)
@@ -103,10 +162,10 @@ func TestCreatePullRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.AssertPullRequestCreated(testGitHubRepo, &scm.PullRequestInput{
-		Title: input.Title,
-		Body:  input.Body,
-		Head:  "test-branch-a",
-		Base:  testBranch,
+		Title:  input.Title,
+		Body:   input.Body,
+		Source: "test-branch-a",
+		Target: testBranch,
 	})
 	if pr.Link != "https://example.com/pull-request/1" {
 		t.Fatalf("link to PR is incorrect: got %#v, want %#v", pr.Link, "https://example.com/pull-request/1")

@@ -3,8 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/http"
 
-	"github.com/jenkins-x/go-scm/scm"
+	"github.com/ocraviotto/go-scm/scm"
 )
 
 // New creates and returns a new SCMClient.
@@ -24,7 +25,11 @@ type SCMClient struct {
 func (c *SCMClient) GetFile(ctx context.Context, repo, ref, path string) (*scm.Content, error) {
 	content, r, err := c.scmClient.Contents.Find(ctx, repo, path, ref)
 	if r != nil && isErrorStatus(r.Status) {
-		return nil, scmError{msg: fmt.Sprintf("failed to get file %s from repo %s ref %s", path, repo, ref), Status: r.Status}
+		e := SCMError{Msg: fmt.Sprintf("failed to get file %s from repo %s ref %s", path, repo, ref), Status: r.Status}
+		if r.Status == http.StatusNotFound {
+			return content, e
+		}
+		return nil, e
 	}
 	if err != nil {
 		return nil, err
@@ -34,10 +39,8 @@ func (c *SCMClient) GetFile(ctx context.Context, repo, ref, path string) (*scm.C
 
 // CreateBranch will create a new branch in the repo from the SHA.
 func (c *SCMClient) CreateBranch(ctx context.Context, repo, branch, sha string) error {
-	if isGitHub(c.scmClient) {
-		branch = fmt.Sprintf("refs/heads/%s", branch)
-	}
-	_, _, err := c.scmClient.Git.CreateRef(ctx, repo, branch, sha)
+	params := &scm.CreateBranch{Name: branch, Sha: sha}
+	_, err := c.scmClient.Git.CreateBranch(ctx, repo, params)
 	return err
 }
 
@@ -54,19 +57,44 @@ func (c *SCMClient) CreatePullRequest(ctx context.Context, repo string, inp *scm
 //
 // If an HTTP error is returned by the upstream service, an error with the
 // response status code is returned.
-func (c *SCMClient) UpdateFile(ctx context.Context, repo, branch, path, message, previousSHA string, content []byte) error {
+func (c *SCMClient) UpdateFile(ctx context.Context, repo, branch, path, message, previousSHA string, signature scm.Signature, content []byte) error {
 	params := scm.ContentParams{
-		Message: message,
-		Data:    content,
-		Branch:  branch,
-		Sha:     previousSHA,
+		Message:   message,
+		Data:      content,
+		Branch:    branch,
+		Sha:       previousSHA,
+		BlobID:    previousSHA,
+		Signature: signature,
 	}
 	r, err := c.scmClient.Contents.Update(ctx, repo, path, &params)
 	if err != nil {
 		return err
 	}
 	if isErrorStatus(r.Status) {
-		return scmError{msg: fmt.Sprintf("failed to update file %s in repo %s branch %s", path, repo, branch), Status: r.Status}
+		return SCMError{Msg: fmt.Sprintf("failed to update file %s in repo %s branch %s", path, repo, branch), Status: r.Status}
+	}
+	return nil
+}
+
+// DeleteFile deletes a file in a repository
+//
+// If an HTTP error is returned by the upstream service, an error with the
+// response status code is returned.
+func (c *SCMClient) DeleteFile(ctx context.Context, repo, branch, path, message, previousSHA string, signature scm.Signature, content []byte) error {
+	params := scm.ContentParams{
+		Message:   message,
+		Data:      content,
+		Branch:    branch,
+		Sha:       previousSHA,
+		BlobID:    previousSHA,
+		Signature: signature,
+	}
+	r, err := c.scmClient.Contents.Delete(ctx, repo, path, &params)
+	if err != nil {
+		return err
+	}
+	if isErrorStatus(r.Status) {
+		return SCMError{Msg: fmt.Sprintf("failed to delete file %s in repo %s branch %s", path, repo, branch), Status: r.Status}
 	}
 	return nil
 }
@@ -76,12 +104,8 @@ func (c *SCMClient) UpdateFile(ctx context.Context, repo, branch, path, message,
 // If an HTTP error is returned by the upstream service, an error with the
 // response status code is returned.
 func (c *SCMClient) GetBranchHead(ctx context.Context, repo, branch string) (string, error) {
-	sha, _, err := c.scmClient.Git.FindRef(ctx, repo, fmt.Sprintf("heads/%s", branch))
-	return sha, err
-}
-
-func isGitHub(c *scm.Client) bool {
-	return c.Driver == scm.DriverGithub
+	ref, _, err := c.scmClient.Git.FindBranch(ctx, repo, branch)
+	return ref.Sha, err
 }
 
 func isErrorStatus(i int) bool {

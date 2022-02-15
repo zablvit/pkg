@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gitops-tools/pkg/client"
-	"github.com/jenkins-x/go-scm/scm"
+	"github.com/ocraviotto/go-scm/scm"
+	"github.com/ocraviotto/pkg/client"
 )
 
 var _ client.GitClient = (*MockClient)(nil)
@@ -45,7 +45,7 @@ type MockClient struct {
 // GetFile implements the client.GitClient interface.
 func (m *MockClient) GetFile(ctx context.Context, repo, ref, path string) (*scm.Content, error) {
 	if m.GetFileErr != nil {
-		return nil, m.GetFileErr
+		return &scm.Content{}, m.GetFileErr
 	}
 	if b, ok := m.files[key(repo, path, ref)]; ok {
 		return &scm.Content{Data: b, Sha: bytesSha1(b)}, nil
@@ -54,13 +54,18 @@ func (m *MockClient) GetFile(ctx context.Context, repo, ref, path string) (*scm.
 }
 
 // UpdateFile implements the client.GitClient interface.
-func (m *MockClient) UpdateFile(ctx context.Context, repo, branch, path, message, previousSHA string, content []byte) error {
+func (m *MockClient) UpdateFile(ctx context.Context, repo, branch, path, message, previousSHA string, signature scm.Signature, content []byte) error {
 	if m.UpdateFileErr != nil {
 		return m.UpdateFileErr
 	}
 	// TODO: Do we need something to validate the previousSHA?
 	m.updatedFiles[key(repo, path, branch)] = content
 	return nil
+}
+
+// DeleteFile is here for future ref
+func (c *MockClient) DeleteFile(ctx context.Context, repo, branch, path, message, previousSHA string, signature scm.Signature, content []byte) error {
+	return scm.ErrNotSupported
 }
 
 // CreatePullRequest implements the client.GitClient interface.

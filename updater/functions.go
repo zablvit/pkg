@@ -1,7 +1,7 @@
 package updater
 
 import (
-	"github.com/gitops-tools/pkg/syaml"
+	"github.com/ocraviotto/pkg/syaml"
 )
 
 // ReplaceContents is a ContentUpdater that replaces the content of file with the
@@ -13,11 +13,21 @@ func ReplaceContents(b []byte) ContentUpdater {
 }
 
 // UpdateYAML is a ContentUpdater that updates a YAML file using a key and new
-// value, they key can be a dotted path.
+// value, the key can be a dotted path.
 //
 // UpdateYAML("test.value", []string{"test", "value"})
 func UpdateYAML(key string, newValue interface{}) ContentUpdater {
 	return func(b []byte) ([]byte, error) {
 		return syaml.SetBytes(b, key, newValue)
+	}
+}
+
+// RemoveYAMLKey is a ContentUpdater that removes the target key from a YAML file
+// value, the key can be a dotted path.
+//
+// RemoveYAMLKey("test.value")
+func RemoveYAMLKey(key string) ContentUpdater {
+	return func(b []byte) ([]byte, error) {
+		return syaml.DeleteBytes(b, key)
 	}
 }

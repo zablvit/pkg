@@ -69,3 +69,39 @@ func TestSetFailures(t *testing.T) {
 		}
 	}
 }
+
+func TestDelete(t *testing.T) {
+	delteSets := []struct {
+		source string
+		patch  string
+		want   string
+	}{
+		{
+			source: "name: testing\nsurname: always\n",
+			patch:  "name",
+			want:   "surname: always\n",
+		},
+		{
+			source: "person:\n  age: 30\n  name: John\n",
+			patch:  "person.name",
+			want:   "person:\n  age: 30\n",
+		},
+		{
+			source: "items:\n- age: 30\n- age: 29\n",
+			patch:  "items.1",
+			want:   "items:\n- age: 30\n",
+		},
+	}
+
+	for i, tt := range delteSets {
+		updated, err := DeleteBytes([]byte(tt.source), tt.patch)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+
+		if string(updated) != tt.want {
+			t.Errorf("%d failed, got %#v, want %#v", i, string(updated), tt.want)
+		}
+	}
+}

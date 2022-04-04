@@ -211,6 +211,29 @@ func TestUpdateFileWithNoConnection(t *testing.T) {
 	}
 }
 
+func TestUpdateFileToPrivateRepositoryWithBadCreds(t *testing.T) {
+	message := "just a test message"
+	branch := "master"
+	repository := "Codertocat/Hello-World"
+	signature := scm.Signature{
+		Name:  "John Doe",
+		Email: "john.doe@example.com",
+	}
+
+	scmClient, err := factory.NewClient("github", "", "myfaketoken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := New(scmClient)
+
+	err = client.UpdateFile(context.TODO(), repository, branch,
+		"./README.md", message, "6113728f27ae82c7b1a177c8d03f9e96e0adf246",
+		signature, []byte(`testing`))
+	if !test.MatchError(t, `failed to update file.*\(401\)$`, err) {
+		t.Fatalf("failed to match error: %s", err)
+	}
+}
+
 func TestCreateBranchInGitHub(t *testing.T) {
 	sha := "aa218f56b14c9653891f9e74264a383fa43fefbd"
 

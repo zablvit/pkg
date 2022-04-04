@@ -25,7 +25,8 @@ type CommitInput struct {
 	Repo               string        // e.g. my-org/my-repo
 	Filename           string        // relative path to the file in the repository
 	Branch             string        // e.g. main
-	BranchGenerateName string        // e.g. update-image-
+	BranchGenerateName string        // e.g. gitops-
+	DisablePRCreation  bool          // Whether to disable PR creation
 	CreateMissing      bool          // Whether to create the target file if it's missing
 	RemoveFile         bool          // Whether to remove the target file
 	CommitMessage      string        // This is used for the commit when updating the file
@@ -69,13 +70,17 @@ type Updater struct {
 // ApplyUpdateToFile does the job of fetching a file, passing it to a
 // user-provided function if not deleting it, and optionally creating a PR.
 func (u *Updater) ApplyUpdateToFile(ctx context.Context, input CommitInput, f ContentUpdater) (string, error) {
-	var updated []byte
-	var isNotFoundError bool
+	var (
+		updated         []byte
+		isNotFoundError bool
+		currentSHA      string
+	)
+
 	isFileOp := input.RemoveFile || input.CreateMissing
 	current, err := u.gitClient.GetFile(ctx, input.Repo, input.Branch, input.Filename)
 	if err != nil {
 		isNotFoundError = client.IsNotFound(err)
-		if !isFileOp || (isFileOp && !isNotFoundError) {
+		if !isNotFoundError || (isNotFoundError && !isFileOp) {
 			u.log.Info("failed to get file from repo", "err", err)
 			return "", err
 		}
@@ -84,16 +89,20 @@ func (u *Updater) ApplyUpdateToFile(ctx context.Context, input CommitInput, f Co
 		return "", fmt.Errorf("removing a non-existing file %s in branch %s is not necessary", input.Filename, input.Branch)
 	}
 	if current.Sha != "" {
+		currentSHA = current.Sha
 		u.log.Info("got existing file", "sha", current.Sha)
-	}
-	if !input.RemoveFile {
-		updated, err = f(current.Data)
+	} else if isNotFoundError {
+		currentSHA, err = u.gitClient.GetBranchHead(ctx, input.Repo, input.Branch)
 		if err != nil {
-			return "", err
+			u.log.Info("unable to get parent sha for branch, if branch is main, it may still succeed", "err", err, "branch", input.Branch)
 		}
 	}
+	updated, err = f(current.Data)
+	if err != nil {
+		return "", fmt.Errorf("failed to apply update: %v", err)
+	}
 
-	return u.applyUpdate(ctx, input, current.Sha, updated)
+	return u.applyUpdate(ctx, input, currentSHA, updated)
 }
 
 func (u *Updater) applyUpdate(ctx context.Context, input CommitInput, currentSHA string, newBody []byte) (string, error) {
@@ -125,8 +134,8 @@ func (u *Updater) applyUpdate(ctx context.Context, input CommitInput, currentSHA
 }
 
 func (u *Updater) createBranchIfNecessary(ctx context.Context, input CommitInput, sourceRef string) (string, error) {
-	if input.BranchGenerateName == "" {
-		u.log.Info("no branchGenerateName configured, reusing source branch", "branch", input.Branch)
+	if input.DisablePRCreation {
+		u.log.Info("DisablePRCreation set, committing directly to source branch", "branch", input.Branch)
 		return input.Branch, nil
 	}
 

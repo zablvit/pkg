@@ -67,11 +67,11 @@ func (c *SCMClient) UpdateFile(ctx context.Context, repo, branch, path, message,
 		Signature: signature,
 	}
 	r, err := c.scmClient.Contents.Update(ctx, repo, path, &params)
+	if r != nil && isErrorStatus(r.Status) {
+		return SCMError{Msg: fmt.Sprintf("failed to update file %s in repo %s branch %s", path, repo, branch), Status: r.Status}
+	}
 	if err != nil {
 		return err
-	}
-	if isErrorStatus(r.Status) {
-		return SCMError{Msg: fmt.Sprintf("failed to update file %s in repo %s branch %s", path, repo, branch), Status: r.Status}
 	}
 	return nil
 }
@@ -90,11 +90,11 @@ func (c *SCMClient) DeleteFile(ctx context.Context, repo, branch, path, message,
 		Signature: signature,
 	}
 	r, err := c.scmClient.Contents.Delete(ctx, repo, path, &params)
+	if r != nil && isErrorStatus(r.Status) {
+		return SCMError{Msg: fmt.Sprintf("failed to delete file %s in repo %s branch %s", path, repo, branch), Status: r.Status}
+	}
 	if err != nil {
 		return err
-	}
-	if isErrorStatus(r.Status) {
-		return SCMError{Msg: fmt.Sprintf("failed to delete file %s in repo %s branch %s", path, repo, branch), Status: r.Status}
 	}
 	return nil
 }

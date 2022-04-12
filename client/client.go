@@ -25,7 +25,7 @@ type SCMClient struct {
 func (c *SCMClient) GetFile(ctx context.Context, repo, ref, path string) (*scm.Content, error) {
 	content, r, err := c.scmClient.Contents.Find(ctx, repo, path, ref)
 	if r != nil && isErrorStatus(r.Status) {
-		e := SCMError{Msg: fmt.Sprintf("failed to get file %s from repo %s ref %s", path, repo, ref), Status: r.Status}
+		e := newSCMError(fmt.Sprintf("failed to get file %s from repo %s ref %s", path, repo, ref), r.Status, r.Body)
 		if r.Status == http.StatusNotFound {
 			return content, e
 		}
@@ -68,7 +68,7 @@ func (c *SCMClient) UpdateFile(ctx context.Context, repo, branch, path, message,
 	}
 	r, err := c.scmClient.Contents.Update(ctx, repo, path, &params)
 	if r != nil && isErrorStatus(r.Status) {
-		return SCMError{Msg: fmt.Sprintf("failed to update file %s in repo %s branch %s", path, repo, branch), Status: r.Status}
+		return newSCMError(fmt.Sprintf("failed to update file %s in repo %s branch %s", path, repo, branch), r.Status, r.Body)
 	}
 	if err != nil {
 		return err
@@ -91,7 +91,7 @@ func (c *SCMClient) DeleteFile(ctx context.Context, repo, branch, path, message,
 	}
 	r, err := c.scmClient.Contents.Delete(ctx, repo, path, &params)
 	if r != nil && isErrorStatus(r.Status) {
-		return SCMError{Msg: fmt.Sprintf("failed to delete file %s in repo %s branch %s", path, repo, branch), Status: r.Status}
+		return newSCMError(fmt.Sprintf("failed to delete file %s in repo %s branch %s", path, repo, branch), r.Status, r.Body)
 	}
 	if err != nil {
 		return err

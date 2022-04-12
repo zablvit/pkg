@@ -2,6 +2,8 @@ package client
 
 import (
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
 )
 
@@ -13,10 +15,28 @@ func IsNotFound(err error) bool {
 }
 
 type SCMError struct {
-	Msg    string
-	Status int
+	Msg         string
+	Status      int
+	ResponseMsg string
 }
 
 func (s SCMError) Error() string {
-	return fmt.Sprintf("%s: (%d)", s.Msg, s.Status)
+	return fmt.Sprintf("%s: response status %d: %s", s.Msg, s.Status, s.ResponseMsg)
+}
+
+func newSCMError(msg string, status int, body io.ReadCloser) SCMError {
+	defer func() { _ = body.Close() }()
+
+	e := SCMError{
+		Msg:    msg,
+		Status: status,
+	}
+
+	bytes, err := ioutil.ReadAll(body)
+	if err != nil {
+		return e
+	}
+
+	e.ResponseMsg = string(bytes)
+	return e
 }

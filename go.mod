@@ -1,4 +1,4 @@
-module github.com/ocraviotto/pkg
+module github.com/zablvit/pkg
 
 go 1.17
 
